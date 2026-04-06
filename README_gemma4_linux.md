@@ -100,3 +100,36 @@ If you pass an empty first argument, it uses the Hugging Face model ID instead o
 ```bash
 ./run_gemma4_linux.sh "" "Explain MoE in one sentence."
 ```
+
+## 6) vLLM runner (separate script)
+
+Install vLLM dependencies in your venv:
+
+```bash
+python3 -m pip install -r requirements-vllm.txt
+```
+
+Run with a local downloaded model folder:
+
+```bash
+python3 gemma4_vllm_runner.py \
+  --model-path /path/to/gemma-4-26B-A4B-it \
+  --local-files-only \
+  --prompt "Write a short joke about saving RAM."
+```
+
+Or use the shell shortcut:
+
+```bash
+chmod +x run_gemma4_vllm_linux.sh
+./run_gemma4_vllm_linux.sh /path/to/gemma-4-26B-A4B-it "Write a short joke about saving RAM."
+```
+
+Quick dry-run check:
+
+```bash
+python3 gemma4_vllm_runner.py \
+  --model-path /path/to/gemma-4-26B-A4B-it \
+  --local-files-only \
+  --dry-run
+```
