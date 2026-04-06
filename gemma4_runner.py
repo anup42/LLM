@@ -102,9 +102,63 @@ def resolve_model_source(args: argparse.Namespace) -> tuple[str, bool]:
     return args.model_id, bool(args.local_files_only)
 
 
+def _ensure_mapping(value: object, source_name: str) -> dict:
+    if hasattr(value, "items"):
+        return dict(value)
+    raise TypeError(
+        f"{source_name} returned {type(value).__name__}, expected a mapping with keys like input_ids."
+    )
+
+
+def _prepare_inputs_with_chat_template(
+    chat_object,
+    prompt: str,
+    target_name: str,
+) -> dict:
+    # Some templates expect multimodal message items; others expect plain text.
+    candidates = [
+        [{"role": "user", "content": [{"type": "text", "text": prompt}]}],
+        [{"role": "user", "content": prompt}],
+    ]
+    last_error = None
+
+    for messages in candidates:
+        try:
+            prepared = chat_object.apply_chat_template(
+                messages,
+                add_generation_prompt=True,
+                tokenize=True,
+                return_dict=True,
+                return_tensors="pt",
+            )
+            return _ensure_mapping(prepared, f"{target_name}.apply_chat_template")
+        except Exception as exc:
+            last_error = exc
+
+    for messages in candidates:
+        try:
+            text = chat_object.apply_chat_template(
+                messages,
+                tokenize=False,
+                add_generation_prompt=True,
+            )
+            prepared = chat_object(text, return_tensors="pt")
+            return _ensure_mapping(prepared, f"{target_name}(text)")
+        except Exception as exc:
+            last_error = exc
+
+    raise RuntimeError(
+        f"Unable to prepare model inputs from chat template. Last error: {last_error}"
+    )
+
+
 def run_inference(args: argparse.Namespace, model_source: str, local_only: bool) -> str:
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+    try:
+        from transformers import AutoProcessor
+    except Exception:
+        AutoProcessor = None
 
     has_cuda = torch.cuda.is_available()
     if has_cuda:
@@ -143,27 +197,50 @@ def run_inference(args: argparse.Namespace, model_source: str, local_only: bool)
         )
 
     print(f"[info] Loading model from: {model_source}")
-    tokenizer = AutoTokenizer.from_pretrained(
-        model_source, trust_remote_code=True, local_files_only=local_only
-    )
     model = AutoModelForCausalLM.from_pretrained(model_source, **model_kwargs)
     model.eval()
 
-    messages = [
-        {"role": "user", "content": args.prompt},
-    ]
-    if not hasattr(tokenizer, "apply_chat_template"):
-        raise RuntimeError(
-            "Loaded tokenizer does not support chat templates. "
-            "Please upgrade transformers and try again."
-        )
+    chat_object = None
+    chat_object_name = ""
+    prep_error = None
 
-    text = tokenizer.apply_chat_template(
-        messages,
-        tokenize=False,
-        add_generation_prompt=True,
-    )
-    inputs = tokenizer(text, return_tensors="pt")
+    if AutoProcessor is not None:
+        try:
+            processor = AutoProcessor.from_pretrained(
+                model_source, trust_remote_code=True, local_files_only=local_only
+            )
+            if hasattr(processor, "apply_chat_template"):
+                chat_object = processor
+                chat_object_name = "processor"
+        except Exception as exc:
+            prep_error = exc
+
+    if chat_object is None:
+        tokenizer = AutoTokenizer.from_pretrained(
+            model_source, trust_remote_code=True, local_files_only=local_only
+        )
+        if not hasattr(tokenizer, "apply_chat_template"):
+            raise RuntimeError(
+                "Loaded tokenizer does not support chat templates. "
+                "Please upgrade transformers and try again."
+            )
+        chat_object = tokenizer
+        chat_object_name = "tokenizer"
+
+    try:
+        inputs = _prepare_inputs_with_chat_template(
+            chat_object=chat_object,
+            prompt=args.prompt,
+            target_name=chat_object_name,
+        )
+    except Exception as exc:
+        if prep_error is not None:
+            raise RuntimeError(
+                f"Input preparation failed (processor fallback error: {prep_error}). "
+                f"Final error: {exc}"
+            ) from exc
+        raise
+
     target_device = "cuda" if has_cuda else "cpu"
     inputs = {k: v.to(target_device) for k, v in inputs.items()}
 
@@ -186,7 +263,14 @@ def run_inference(args: argparse.Namespace, model_source: str, local_only: bool)
 
     prompt_len = inputs["input_ids"].shape[-1]
     generated_ids = output_ids[0][prompt_len:]
-    decoded = tokenizer.decode(generated_ids, skip_special_tokens=True)
+    if hasattr(chat_object, "decode"):
+        decoded = chat_object.decode(generated_ids, skip_special_tokens=True)
+    elif hasattr(chat_object, "batch_decode"):
+        decoded = chat_object.batch_decode(
+            [generated_ids], skip_special_tokens=True
+        )[0]
+    else:
+        raise RuntimeError("Unable to decode output with loaded processor/tokenizer.")
     return decoded.strip()
 
 

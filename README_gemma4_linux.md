@@ -25,6 +25,12 @@ If you previously saw `Could not import module 'AutoProcessor'`, run:
 python3 -m pip install --upgrade --force-reinstall "transformers>=4.57.1,<5" "tokenizers>=0.21.0" "huggingface-hub>=0.31.0"
 ```
 
+If you saw `list object has no attribute keys`, update to the latest runner code and refresh packages:
+
+```bash
+python3 -m pip install --upgrade --force-reinstall -r requirements-gemma4.txt
+```
+
 If you see `CUDA GPU not detected by PyTorch`, run:
 
 ```bash
