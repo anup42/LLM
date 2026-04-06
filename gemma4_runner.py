@@ -77,6 +77,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Validate configuration and exit without loading the model.",
     )
+    parser.add_argument(
+        "--allow-cpu",
+        action="store_true",
+        help="Allow CPU execution (very slow / usually impractical for 26B).",
+    )
     return parser.parse_args()
 
 
@@ -101,16 +106,30 @@ def run_inference(args: argparse.Namespace, model_source: str, local_only: bool)
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
-    if torch.cuda.is_available():
+    has_cuda = torch.cuda.is_available()
+    if has_cuda:
         gpu_name = torch.cuda.get_device_name(0)
         print(f"[info] CUDA GPU detected: {gpu_name}")
     else:
-        print("[warn] CUDA GPU not detected. This model is intended for GPU inference.")
+        if not args.allow_cpu:
+            raise RuntimeError(
+                "CUDA GPU not detected by PyTorch.\n"
+                f"torch={torch.__version__}, torch_cuda_build={torch.version.cuda}\n"
+                "Install a CUDA-enabled PyTorch build and verify with:\n"
+                "python3 -c \"import torch; print(torch.__version__, torch.version.cuda, torch.cuda.is_available())\"\n"
+                "For systems with CUDA 12.2 drivers, prefer cu121 wheels:\n"
+                "python3 -m pip install --index-url https://download.pytorch.org/whl/cu121 torch torchvision torchaudio"
+            )
+        print("[warn] CUDA GPU not detected. Continuing on CPU due to --allow-cpu.")
 
     use_4bit = not args.no_4bit
+    if not has_cuda and use_4bit:
+        print("[warn] 4-bit quantization disabled on CPU path.")
+        use_4bit = False
+
     model_kwargs = {
         "device_map": "auto",
-        "torch_dtype": torch.bfloat16 if torch.cuda.is_available() else torch.float32,
+        "torch_dtype": torch.bfloat16 if has_cuda else torch.float32,
         "trust_remote_code": True,
         "local_files_only": local_only,
     }
@@ -145,7 +164,7 @@ def run_inference(args: argparse.Namespace, model_source: str, local_only: bool)
         add_generation_prompt=True,
     )
     inputs = tokenizer(text, return_tensors="pt")
-    target_device = "cuda" if torch.cuda.is_available() else "cpu"
+    target_device = "cuda" if has_cuda else "cpu"
     inputs = {k: v.to(target_device) for k, v in inputs.items()}
 
     do_sample = args.temperature > 0
