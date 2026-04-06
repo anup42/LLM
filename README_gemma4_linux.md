@@ -1,0 +1,55 @@
+# Gemma 4 26B A4B Runner (Linux, RTX A6000)
+
+This setup runs `google/gemma-4-26B-A4B-it` with an option to use a **pre-downloaded local model folder**.
+
+## 1) Linux setup
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+
+# Install PyTorch for your CUDA version. Example for CUDA 12.4:
+pip install --index-url https://download.pytorch.org/whl/cu124 torch
+
+pip install -r requirements-gemma4.txt
+```
+
+## 2) Run using local downloaded model folder (no download)
+
+```bash
+python gemma4_runner.py \
+  --model-path /path/to/gemma-4-26B-A4B-it \
+  --local-files-only \
+  --prompt "Write a short joke about saving RAM."
+```
+
+## 3) Run using Hugging Face model ID
+
+```bash
+python gemma4_runner.py \
+  --model-id google/gemma-4-26B-A4B-it \
+  --prompt "Write a short joke about saving RAM."
+```
+
+## 4) Dry-run check (no model load/download)
+
+```bash
+python gemma4_runner.py \
+  --model-path /path/to/gemma-4-26B-A4B-it \
+  --local-files-only \
+  --dry-run
+```
+
+## 5) Shortcut script
+
+```bash
+chmod +x run_gemma4_linux.sh
+./run_gemma4_linux.sh /path/to/gemma-4-26B-A4B-it "Write a short joke about saving RAM."
+```
+
+If you pass an empty first argument, it uses the Hugging Face model ID instead of local path:
+
+```bash
+./run_gemma4_linux.sh "" "Explain MoE in one sentence."
+```
