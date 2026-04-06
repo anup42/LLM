@@ -5,20 +5,29 @@ This setup runs `google/gemma-4-26B-A4B-it` with an option to use a **pre-downlo
 ## 1) Linux setup
 
 ```bash
+# If python3 is missing:
+# Ubuntu/Debian: sudo apt-get update && sudo apt-get install -y python3 python3-venv python3-pip
+
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install --upgrade pip
+python3 -m pip install --upgrade pip
 
 # Install PyTorch for your CUDA version. Example for CUDA 12.4:
-pip install --index-url https://download.pytorch.org/whl/cu124 torch
+python3 -m pip install --index-url https://download.pytorch.org/whl/cu124 torch
 
-pip install -r requirements-gemma4.txt
+python3 -m pip install -r requirements-gemma4.txt
+```
+
+If you previously saw `Could not import module 'AutoProcessor'`, run:
+
+```bash
+python3 -m pip install --upgrade --force-reinstall "transformers>=4.57.1,<5" "tokenizers>=0.21.0" "huggingface-hub>=0.31.0"
 ```
 
 ## 2) Run using local downloaded model folder (no download)
 
 ```bash
-python gemma4_runner.py \
+python3 gemma4_runner.py \
   --model-path /path/to/gemma-4-26B-A4B-it \
   --local-files-only \
   --prompt "Write a short joke about saving RAM."
@@ -27,7 +36,7 @@ python gemma4_runner.py \
 ## 3) Run using Hugging Face model ID
 
 ```bash
-python gemma4_runner.py \
+python3 gemma4_runner.py \
   --model-id google/gemma-4-26B-A4B-it \
   --prompt "Write a short joke about saving RAM."
 ```
@@ -35,7 +44,7 @@ python gemma4_runner.py \
 ## 4) Dry-run check (no model load/download)
 
 ```bash
-python gemma4_runner.py \
+python3 gemma4_runner.py \
   --model-path /path/to/gemma-4-26B-A4B-it \
   --local-files-only \
   --dry-run

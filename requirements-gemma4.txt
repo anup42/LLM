@@ -1,4 +1,9 @@
-transformers>=4.57.0
+# Python requirement: Python 3.10+ (use python3/pip3 on Linux)
+# Example install (Ubuntu/Debian): sudo apt-get install -y python3 python3-venv python3-pip
+# AutoProcessor/AutoTokenizer issues usually come from older transformers builds.
+transformers>=4.57.1,<5
+huggingface-hub>=0.31.0
+tokenizers>=0.21.0
 accelerate>=1.5.0
 bitsandbytes>=0.46.0
 sentencepiece>=0.2.0

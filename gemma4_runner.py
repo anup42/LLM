@@ -99,7 +99,7 @@ def resolve_model_source(args: argparse.Namespace) -> tuple[str, bool]:
 
 def run_inference(args: argparse.Namespace, model_source: str, local_only: bool) -> str:
     import torch
-    from transformers import AutoModelForCausalLM, AutoProcessor, BitsAndBytesConfig
+    from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
     if torch.cuda.is_available():
         gpu_name = torch.cuda.get_device_name(0)
@@ -124,7 +124,7 @@ def run_inference(args: argparse.Namespace, model_source: str, local_only: bool)
         )
 
     print(f"[info] Loading model from: {model_source}")
-    processor = AutoProcessor.from_pretrained(
+    tokenizer = AutoTokenizer.from_pretrained(
         model_source, trust_remote_code=True, local_files_only=local_only
     )
     model = AutoModelForCausalLM.from_pretrained(model_source, **model_kwargs)
@@ -133,12 +133,18 @@ def run_inference(args: argparse.Namespace, model_source: str, local_only: bool)
     messages = [
         {"role": "user", "content": args.prompt},
     ]
-    text = processor.apply_chat_template(
+    if not hasattr(tokenizer, "apply_chat_template"):
+        raise RuntimeError(
+            "Loaded tokenizer does not support chat templates. "
+            "Please upgrade transformers and try again."
+        )
+
+    text = tokenizer.apply_chat_template(
         messages,
         tokenize=False,
         add_generation_prompt=True,
     )
-    inputs = processor(text=text, return_tensors="pt")
+    inputs = tokenizer(text, return_tensors="pt")
     target_device = "cuda" if torch.cuda.is_available() else "cpu"
     inputs = {k: v.to(target_device) for k, v in inputs.items()}
 
@@ -161,15 +167,7 @@ def run_inference(args: argparse.Namespace, model_source: str, local_only: bool)
 
     prompt_len = inputs["input_ids"].shape[-1]
     generated_ids = output_ids[0][prompt_len:]
-    decoded = processor.decode(generated_ids, skip_special_tokens=False)
-
-    if hasattr(processor, "parse_response"):
-        parsed = processor.parse_response(decoded)
-        if isinstance(parsed, dict):
-            response = parsed.get("response")
-            if isinstance(response, str) and response.strip():
-                return response.strip()
-
+    decoded = tokenizer.decode(generated_ids, skip_special_tokens=True)
     return decoded.strip()
 
 
