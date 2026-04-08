@@ -143,6 +143,30 @@ def _extract_text(output_list) -> str:
     return str(first).strip()
 
 
+def _looks_like_gemma4_arch_error(text: str) -> bool:
+    lowered = text.lower()
+    return (
+        ("gemma4config" in lowered)
+        or ("could not import module" in lowered and "gemma4" in lowered)
+        or (
+            "model type" in lowered
+            and "gemma4" in lowered
+            and ("does not recognize" in lowered or "does not recognise" in lowered)
+        )
+    )
+
+
+def _gemma4_arch_fix_hint(prefix: str, original_error: Exception) -> RuntimeError:
+    return RuntimeError(
+        f"{prefix}: {original_error}\n"
+        "Gemma 4 requires newer Transformers support.\n"
+        "Try:\n"
+        "python3 -m pip install --upgrade --force-reinstall "
+        "\"transformers>=5.5.0,<6\" \"tokenizers>=0.21.0\" \"huggingface-hub>=0.31.0\"\n"
+        "If using a local model folder, verify config.json has model_type \"gemma4\" and no broken auto_map strings."
+    )
+
+
 def run_inference(args: argparse.Namespace, model_source: str, local_only: bool) -> str:
     import torch
     from vllm import LLM, SamplingParams
@@ -169,7 +193,12 @@ def run_inference(args: argparse.Namespace, model_source: str, local_only: bool)
         llm_kwargs["download_dir"] = args.download_dir
 
     print(f"[info] Loading vLLM model from: {model_source}")
-    llm = LLM(**llm_kwargs)
+    try:
+        llm = LLM(**llm_kwargs)
+    except Exception as exc:
+        if _looks_like_gemma4_arch_error(str(exc)):
+            raise _gemma4_arch_fix_hint("vLLM model load failed", exc) from exc
+        raise
     sampling_params = SamplingParams(
         max_tokens=args.max_new_tokens,
         temperature=args.temperature,
@@ -188,9 +217,14 @@ def run_inference(args: argparse.Namespace, model_source: str, local_only: bool)
 
     from transformers import AutoTokenizer
 
-    tokenizer = AutoTokenizer.from_pretrained(
-        model_source, trust_remote_code=True, local_files_only=local_only
-    )
+    try:
+        tokenizer = AutoTokenizer.from_pretrained(
+            model_source, trust_remote_code=True, local_files_only=local_only
+        )
+    except Exception as exc:
+        if _looks_like_gemma4_arch_error(str(exc)):
+            raise _gemma4_arch_fix_hint("Tokenizer load failed", exc) from exc
+        raise
     prompt = tokenizer.apply_chat_template(
         messages,
         tokenize=False,

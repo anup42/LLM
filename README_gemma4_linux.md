@@ -22,7 +22,7 @@ python3 -m pip install -r requirements-gemma4.txt
 If you previously saw `Could not import module 'AutoProcessor'`, run:
 
 ```bash
-python3 -m pip install --upgrade --force-reinstall "transformers>=4.57.1,<5" "tokenizers>=0.21.0" "huggingface-hub>=0.31.0"
+python3 -m pip install --upgrade --force-reinstall "transformers>=5.5.0,<6" "tokenizers>=0.21.0" "huggingface-hub>=0.31.0"
 ```
 
 If you saw `list object has no attribute keys`, update to the latest runner code and refresh packages:
@@ -30,6 +30,23 @@ If you saw `list object has no attribute keys`, update to the latest runner code
 ```bash
 python3 -m pip install --upgrade --force-reinstall -r requirements-gemma4.txt
 ```
+
+If you saw `could not import module 'Gemma4Config'`, run:
+
+```bash
+python3 -m pip install --upgrade --force-reinstall "transformers>=5.5.0,<6" "tokenizers>=0.21.0" "huggingface-hub>=0.31.0"
+```
+
+If you saw `model type 'gemma4' but Transformers does not recognize this architecture`, run the same upgrade command above and verify you are not pinned to old `transformers` in your environment.
+
+Then retry once normally, and once with remote-code preference:
+
+```bash
+python3 gemma4_runner.py --model-path /path/to/gemma-4-26B-A4B-it --local-files-only --prompt "test"
+python3 gemma4_runner.py --model-path /path/to/gemma-4-26B-A4B-it --local-files-only --trust-remote-code --prompt "test"
+```
+
+If using a local model folder, inspect `/path/to/gemma-4-26B-A4B-it/config.json` and check `auto_map` values for stray quotes.
 
 If you see `CUDA GPU not detected by PyTorch`, run:
 

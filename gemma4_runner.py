@@ -82,6 +82,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Allow CPU execution (very slow / usually impractical for 26B).",
     )
+    parser.add_argument(
+        "--trust-remote-code",
+        action="store_true",
+        help="Prefer trust_remote_code=True first when loading model/tokenizer.",
+    )
     return parser.parse_args()
 
 
@@ -108,6 +113,58 @@ def _ensure_mapping(value: object, source_name: str) -> dict:
     raise TypeError(
         f"{source_name} returned {type(value).__name__}, expected a mapping with keys like input_ids."
     )
+
+
+def _looks_like_gemma4_import_error(text: str) -> bool:
+    lowered = text.lower()
+    return (
+        ("gemma4config" in lowered)
+        or ("could not import module" in lowered and "gemma4" in lowered)
+        or (
+            "model type" in lowered
+            and "gemma4" in lowered
+            and ("does not recognize" in lowered or "does not recognise" in lowered)
+        )
+    )
+
+
+def _from_pretrained_with_trust_fallback(
+    loader_fn,
+    model_source: str,
+    prefer_trust_remote_code: bool,
+    **kwargs,
+):
+    attempts = [prefer_trust_remote_code, not prefer_trust_remote_code]
+    errors = []
+
+    for trust_remote_code in attempts:
+        try:
+            obj = loader_fn(
+                model_source,
+                trust_remote_code=trust_remote_code,
+                **kwargs,
+            )
+            return obj, trust_remote_code
+        except Exception as exc:
+            errors.append((trust_remote_code, exc))
+
+    joined = " | ".join(
+        f"trust_remote_code={trust}: {err}" for trust, err in errors
+    )
+    if _looks_like_gemma4_import_error(joined):
+        raise RuntimeError(
+            "Gemma4Config import failed while loading model/tokenizer.\n"
+            "Fix steps:\n"
+            "1) Reinstall core libs:\n"
+            "   python3 -m pip install --upgrade --force-reinstall "
+            "\"transformers>=5.5.0,<6\" \"tokenizers>=0.21.0\" \"huggingface-hub>=0.31.0\"\n"
+            "2) If using --model-path, open config.json and verify auto_map values do not contain stray quotes.\n"
+            "   Example expected value: configuration_gemma4.Gemma4Config\n"
+            "3) Retry with/without --trust-remote-code.\n"
+            f"Loader errors: {joined}"
+        )
+
+    raise RuntimeError(f"Failed loading from_pretrained. Errors: {joined}")
 
 
 def _prepare_inputs_with_chat_template(
@@ -184,7 +241,6 @@ def run_inference(args: argparse.Namespace, model_source: str, local_only: bool)
     model_kwargs = {
         "device_map": "auto",
         "torch_dtype": torch.bfloat16 if has_cuda else torch.float32,
-        "trust_remote_code": True,
         "local_files_only": local_only,
     }
 
@@ -197,7 +253,13 @@ def run_inference(args: argparse.Namespace, model_source: str, local_only: bool)
         )
 
     print(f"[info] Loading model from: {model_source}")
-    model = AutoModelForCausalLM.from_pretrained(model_source, **model_kwargs)
+    model, model_trust = _from_pretrained_with_trust_fallback(
+        AutoModelForCausalLM.from_pretrained,
+        model_source,
+        args.trust_remote_code,
+        **model_kwargs,
+    )
+    print(f"[info] Model loaded with trust_remote_code={model_trust}")
     model.eval()
 
     chat_object = None
@@ -206,18 +268,27 @@ def run_inference(args: argparse.Namespace, model_source: str, local_only: bool)
 
     if AutoProcessor is not None:
         try:
-            processor = AutoProcessor.from_pretrained(
-                model_source, trust_remote_code=True, local_files_only=local_only
+            processor, processor_trust = _from_pretrained_with_trust_fallback(
+                AutoProcessor.from_pretrained,
+                model_source,
+                args.trust_remote_code,
+                local_files_only=local_only,
             )
             if hasattr(processor, "apply_chat_template"):
                 chat_object = processor
                 chat_object_name = "processor"
+                print(
+                    f"[info] Using processor with trust_remote_code={processor_trust}"
+                )
         except Exception as exc:
             prep_error = exc
 
     if chat_object is None:
-        tokenizer = AutoTokenizer.from_pretrained(
-            model_source, trust_remote_code=True, local_files_only=local_only
+        tokenizer, tokenizer_trust = _from_pretrained_with_trust_fallback(
+            AutoTokenizer.from_pretrained,
+            model_source,
+            args.trust_remote_code,
+            local_files_only=local_only,
         )
         if not hasattr(tokenizer, "apply_chat_template"):
             raise RuntimeError(
@@ -226,6 +297,7 @@ def run_inference(args: argparse.Namespace, model_source: str, local_only: bool)
             )
         chat_object = tokenizer
         chat_object_name = "tokenizer"
+        print(f"[info] Using tokenizer with trust_remote_code={tokenizer_trust}")
 
     try:
         inputs = _prepare_inputs_with_chat_template(
@@ -288,6 +360,7 @@ def main() -> int:
         print(f"[ok] Model source: {model_source}")
         print(f"[ok] local_files_only: {local_only}")
         print(f"[ok] 4-bit quantization: {not args.no_4bit}")
+        print(f"[ok] trust_remote_code preferred: {args.trust_remote_code}")
         print(f"[ok] Prompt: {args.prompt}")
         return 0
 
